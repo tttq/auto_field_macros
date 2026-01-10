@@ -726,7 +726,7 @@ fn generate_soft_delete_ext(
                 let context = ::auto_field_trait::auto_field_trait::AutoFieldContext::current_safe();
 
                 // 处理每个 ActiveModel，应用自动字段填充
-                let processed_models: Vec<A> = active_models
+                let processed_models: Vec<Self::ActiveModel> = active_models
                     .into_iter()
                     .map(|mut active_model| {
                         // 应用插入时的自动字段填充
