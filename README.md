@@ -31,9 +31,7 @@ use serde::{Deserialize, Serialize};
     tenant = true,             // 启用租户字段自动填充
     version = true,            // 启用版本号自动管理
     soft_delete = true,        // 启用软删除功能
-    state = true,              // 启用状态字段自动填充
-    default_state = "1",       // 默认状态值
-    default_state_name = "启用" // 默认状态名称
+    skip_default_filters = false  // 是否跳过默认查询条件（delete_flag 和 tenant_id）
 )]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
@@ -46,8 +44,6 @@ pub struct Model {
     pub tenant_name: Option<String>,
     pub version: Option<i32>,
     pub delete_flag: Option<i32>,
-    pub state: Option<String>,
-    pub state_name: Option<String>,
     
     // 业务字段
     pub user_name: Option<String>,
@@ -65,9 +61,7 @@ pub struct Model {
 | `tenant` | bool | false | 是否启用租户字段自动填充 |
 | `version` | bool | false | 是否启用版本号自动管理 |
 | `soft_delete` | bool | false | 是否启用软删除功能 |
-| `state` | bool | false | 是否启用状态字段自动填充 |
-| `default_state` | String | "1" | 默认状态值 |
-| `default_state_name` | String | "启用" | 默认状态名称 |
+| `skip_default_filters` | bool | false | 是否跳过默认查询条件（delete_flag=0 和 tenant_id 过滤） |
 
 ### 3. 简化配置
 
@@ -107,6 +101,17 @@ let tenant_users = Entity::find_by_tenant_id("tenant_001").all(&db).await?;
 let user_records = Entity::find_by_creator_id("user_123").all(&db).await?;
 ```
 
+**默认查询条件**：
+
+当 `skip_default_filters = false`（默认值）时，查询方法会自动添加以下过滤条件：
+
+- `delete_flag = 0`：自动过滤已删除的记录（如果启用了 `soft_delete`）
+- `tenant_id = 当前租户ID`：自动过滤当前租户的数据（如果启用了 `tenant`）
+
+这些默认条件与新增和修改用户时获取上下文的方式一致，都是从 `AutoFieldContext::current_safe()` 获取当前租户ID。
+
+如果需要查询所有记录（包括已删除的记录或其他租户的数据），可以设置 `skip_default_filters = true` 来禁用默认过滤条件。
+
 ### SoftDeleteExt 实现
 
 宏会自动生成软删除方法：
@@ -129,7 +134,6 @@ Entity::soft_delete_many(&db, &["id1", "id2"]).await?;
 | `tenant` | `tenant_id`, `tenant_name` | 设置当前租户 | 不变 |
 | `version` | `version` | 设置为 1 | 递增 |
 | `soft_delete` | `delete_flag` | 设置为 0 | 软删除时设置为 1 |
-| `state` | `state`, `state_name` | 设置默认值 | 不变 |
 
 ## 注意事项
 
