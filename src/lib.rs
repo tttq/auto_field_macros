@@ -516,10 +516,172 @@ fn generate_soft_delete_ext(
                 {
                     Err(sea_orm::DbErr::Custom("Soft delete not enabled for this entity".to_string()))
                 }
+
+                fn batch_update() -> sea_orm::UpdateMany<Self> {
+                   use sea_orm::EntityTrait;
+                     // 调用原始的 update_many 方法
+                    sea_orm::EntityTrait::update_many()
+                }
+
+                async fn batch_insert_many<C>(db: &C, active_models: Vec<Self::ActiveModel>) -> Result<sea_orm::InsertResult<Self::ActiveModel>, sea_orm::DbErr>
+                where
+                    C: sea_orm::ConnectionTrait
+                {
+                 // 执行批量插入
+                sea_orm::EntityTrait::insert_many(active_models).exec(db).await
+                }
             }
         });
     }
-    
+
+    // 生成自动字段填充逻辑
+    let mut before_insert_body = Vec::new();
+    // 添加字段值保护逻辑的辅助宏
+    before_insert_body.push(quote! {
+        macro_rules! should_fill_field {
+            // 处理 Option<T> 类型字段
+            ($field:expr) => {
+                match &$field {
+                    sea_orm::ActiveValue::NotSet => true,
+                    sea_orm::ActiveValue::Set(None) => true,
+                    sea_orm::ActiveValue::Set(Some(_)) => false,
+                    sea_orm::ActiveValue::Unchanged(None) => true,
+                    sea_orm::ActiveValue::Unchanged(Some(_)) => false,
+                }
+            };
+            // 处理非 Option 类型字段
+            ($field:expr, $non_option:ty) => {
+                matches!(&$field, sea_orm::ActiveValue::NotSet)
+            };
+        }
+    });
+
+    // 生成插入时的字段填充逻辑
+    if config.snowflake_id {
+        before_insert_body.push(quote! {
+            if should_fill_field!(active_model.id, String) {
+                use spring::plugin::ComponentRegistry;
+
+                if let Some(mut generator) = spring::App::global().get_component::<snowflake::SnowflakeIdGenerator>() {
+                    if let Ok(id) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| generator.generate().to_string())) {
+                        active_model.id = sea_orm::ActiveValue::Set(id);
+                    }
+                }
+            }
+        });
+    }
+
+    if config.timestamps {
+        before_insert_body.push(quote! {
+            if should_fill_field!(active_model.create_time) {
+                active_model.create_time = sea_orm::ActiveValue::Set(Some(chrono::Utc::now().naive_utc()));
+            }
+            if should_fill_field!(active_model.update_time) {
+                active_model.update_time = sea_orm::ActiveValue::Set(Some(chrono::Utc::now().naive_utc()));
+            }
+        });
+    }
+
+    if config.audit {
+        before_insert_body.push(quote! {
+            if should_fill_field!(active_model.create_by) {
+                if let Some(user_name) = &context.user_name {
+                    if !user_name.is_empty() {
+                        active_model.create_by = sea_orm::ActiveValue::Set(Some(user_name.clone()));
+                    }
+                }
+                if should_fill_field!(active_model.create_id) {
+                    if let Some(user_id) = &context.user_id {
+                        if !user_id.is_empty() {
+                            active_model.create_id = sea_orm::ActiveValue::Set(Some(user_id.clone()));
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    if config.tenant {
+        before_insert_body.push(quote! {
+            if should_fill_field!(active_model.tenant_id) {
+                if let Some(tenant_id) = &context.tenant_id {
+                    if !tenant_id.is_empty() {
+                        active_model.tenant_id = sea_orm::ActiveValue::Set(Some(tenant_id.clone()));
+                    }
+                }
+                if should_fill_field!(active_model.tenant_name) {
+                    if let Some(tenant_name) = &context.tenant_name {
+                        if !tenant_name.is_empty() {
+                            active_model.tenant_name = sea_orm::ActiveValue::Set(Some(tenant_name.clone()));
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    if config.version {
+        before_insert_body.push(quote! {
+            if should_fill_field!(active_model.version) {
+                active_model.version = sea_orm::ActiveValue::Set(Some(1));
+            }
+        });
+    }
+
+    if config.soft_delete {
+        before_insert_body.push(quote! {
+            if should_fill_field!(active_model.delete_flag) {
+                active_model.delete_flag = sea_orm::ActiveValue::Set(Some(0));
+            }
+        });
+    }
+
+    let mut before_update_body = Vec::new();
+    // 时间戳填充
+    if config.timestamps {
+        before_update_body.push(quote! {
+            // 自动填充更新时间
+            update_many = update_many.col_expr(
+                Self::Column::UpdateTime,
+                sea_orm::prelude::Expr::value(Some(chrono::Utc::now().naive_utc()))
+            );
+        });
+    }
+
+    // 审计字段填充
+    if config.audit {
+        before_update_body.push(quote! {
+            // 自动填充更新人信息
+            if let Some(user_name) = &context.user_name {
+                if !user_name.is_empty() {
+                    update_many = update_many.col_expr(
+                        Self::Column::UpdateBy,
+                        sea_orm::prelude::Expr::value(Some(user_name.clone()))
+                    );
+                }
+            }
+            if let Some(user_id) = &context.user_id {
+                if !user_id.is_empty() {
+                    update_many = update_many.col_expr(
+                        Self::Column::UpdateId,
+                        sea_orm::prelude::Expr::value(Some(user_id.clone()))
+                    );
+                }
+            }
+        });
+    }
+
+    // 版本号更新
+    if config.version {
+        before_update_body.push(quote! {
+            // 版本号自动递增
+            update_many = update_many.col_expr(
+                Self::Column::Version,
+                sea_orm::prelude::Expr::col(Self::Column::Version).add(1)
+            );
+        });
+    }
+
     Ok(quote! {
         #[async_trait::async_trait]
         impl ::auto_field_trait::auto_field_trait::SoftDeleteExt for #entity_name {
@@ -527,7 +689,6 @@ fn generate_soft_delete_ext(
             where
                 C: sea_orm::ConnectionTrait,
             {
-                use sea_orm::EntityTrait;
                 if let Some(model) = Self::find_by_id(id).one(db).await? {
                     let mut active_model: #active_model_name = model.into();
                     
@@ -547,6 +708,36 @@ fn generate_soft_delete_ext(
                 }
                 Ok(())
             }
+
+            fn batch_update() -> sea_orm::UpdateMany<Self> {
+                // 获取当前上下文信息
+                let context = ::auto_field_trait::auto_field_trait::AutoFieldContext::current_safe();
+                 // 调用原始的 update_many 方法
+                let mut update_many = sea_orm::EntityTrait::update_many();
+                #(#before_update_body)*
+                update_many
+            }
+
+            async fn batch_insert_many<C>(db: &C, active_models: Vec<Self::ActiveModel>) -> Result<sea_orm::InsertResult<Self::ActiveModel>, sea_orm::DbErr>
+            where
+                C: sea_orm::ConnectionTrait
+            {
+                // 获取当前上下文信息
+                let context = ::auto_field_trait::auto_field_trait::AutoFieldContext::current_safe();
+
+                // 处理每个 ActiveModel，应用自动字段填充
+                let processed_models: Vec<A> = active_models
+                    .into_iter()
+                    .map(|mut active_model| {
+                        // 应用插入时的自动字段填充
+                        #(#before_insert_body)*
+                        active_model
+                    })
+                    .collect();
+                // 执行批量插入
+               sea_orm::EntityTrait::insert_many(processed_models).exec(db).await
+            }
         }
     })
 }
+
