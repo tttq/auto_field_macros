@@ -524,12 +524,8 @@ fn generate_soft_delete_ext(
     if config.snowflake_id {
         before_insert_body.push(quote! {
             if should_fill_field!(active_model.id, String) {
-                use spring::plugin::ComponentRegistry;
-
-                if let Some(mut generator) = spring::App::global().get_component::<snowflake::SnowflakeIdGenerator>() {
-                    if let Ok(id) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| generator.generate().to_string())) {
-                        active_model.id = sea_orm::ActiveValue::Set(id);
-                    }
+                if let Ok(id) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| generator.generate().to_string())) {
+                    active_model.id = sea_orm::ActiveValue::Set(id);
                 }
             }
         });
@@ -677,9 +673,13 @@ fn generate_soft_delete_ext(
                 where
                     I: IntoIterator<Item = Self::ActiveModel>,
                 {
+                    use spring::plugin::ComponentRegistry;
                     // 获取当前上下文信息
                     let context = ::auto_field_trait::auto_field_trait::AutoFieldContext::current_safe();
-
+                    let mut generator = match  spring::App::global().get_component::<snowflake::SnowflakeIdGenerator>(){
+                          Some(generator) => generator,
+                          None => panic!("No SnowflakeIdGenerator component found in the Spring application context."),
+                    };
                     // 处理每个 ActiveModel，应用自动字段填充
                     let processed_models: Vec<Self::ActiveModel> = models
                         .into_iter()
@@ -689,8 +689,10 @@ fn generate_soft_delete_ext(
                             active_model
                         })
                         .collect();
+                    log::debug!("准备执行批量插入，处理后共 {} 个ActiveModel", processed_models.len());
                     // 执行批量插入
-                   sea_orm::EntityTrait::insert_many(processed_models)
+                    let insert_builder = Self::insert_many(processed_models);
+                    insert_builder
                 }
             }
         });
@@ -736,9 +738,13 @@ fn generate_soft_delete_ext(
             where
                 I: IntoIterator<Item = Self::ActiveModel>,
             {
+                use spring::plugin::ComponentRegistry;
                 // 获取当前上下文信息
                 let context = ::auto_field_trait::auto_field_trait::AutoFieldContext::current_safe();
-
+                let mut generator = match  spring::App::global().get_component::<snowflake::SnowflakeIdGenerator>(){
+                      Some(generator) => generator,
+                      None => panic!("No SnowflakeIdGenerator component found in the Spring application context."),
+                };
                 // 处理每个 ActiveModel，应用自动字段填充
                 let processed_models: Vec<Self::ActiveModel> = models
                     .into_iter()
@@ -748,8 +754,10 @@ fn generate_soft_delete_ext(
                         active_model
                     })
                     .collect();
+                log::debug!("准备执行批量插入，处理后共 {} 个ActiveModel", processed_models.len());
                 // 执行批量插入
-               sea_orm::EntityTrait::insert_many(processed_models)
+                let insert_builder = Self::insert_many(processed_models);
+                insert_builder
             }
         }
     })
