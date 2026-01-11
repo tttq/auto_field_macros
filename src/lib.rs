@@ -497,42 +497,6 @@ fn generate_soft_delete_ext(
 ) -> syn::Result<proc_macro2::TokenStream> {
     // SeaORM 生成的 Entity 类型名称是 Entity
     let entity_name = syn::Ident::new("Entity", struct_name.span());
-    
-    if !config.soft_delete {
-        // 如果没有启用软删除，返回空实现
-        return Ok(quote! {
-            #[async_trait::async_trait]
-            impl ::auto_field_trait::auto_field_trait::SoftDeleteExt for #entity_name {
-                async fn soft_delete<C>(_db: &C, _id: &str) -> Result<(), sea_orm::DbErr>
-                where
-                    C: sea_orm::ConnectionTrait,
-                {
-                    Err(sea_orm::DbErr::Custom("Soft delete not enabled for this entity".to_string()))
-                }
-                
-                async fn soft_delete_many<C>(_db: &C, _ids: &[String]) -> Result<(), sea_orm::DbErr>
-                where
-                    C: sea_orm::ConnectionTrait,
-                {
-                    Err(sea_orm::DbErr::Custom("Soft delete not enabled for this entity".to_string()))
-                }
-
-                fn batch_update() -> sea_orm::UpdateMany<Self> {
-                   use sea_orm::EntityTrait;
-                     // 调用原始的 update_many 方法
-                    sea_orm::EntityTrait::update_many()
-                }
-
-                async fn batch_insert_many<C>(db: &C, active_models: Vec<Self::ActiveModel>) -> Result<sea_orm::InsertResult<Self::ActiveModel>, sea_orm::DbErr>
-                where
-                    C: sea_orm::ConnectionTrait
-                {
-                 // 执行批量插入
-                sea_orm::EntityTrait::insert_many(active_models).exec(db).await
-                }
-            }
-        });
-    }
 
     // 生成自动字段填充逻辑
     let mut before_insert_body = Vec::new();
@@ -681,6 +645,56 @@ fn generate_soft_delete_ext(
             );
         });
     }
+    if !config.soft_delete {
+        // 如果没有启用软删除，返回空实现
+        return Ok(quote! {
+            #[async_trait::async_trait]
+            impl ::auto_field_trait::auto_field_trait::SoftDeleteExt for #entity_name {
+                async fn soft_delete<C>(_db: &C, _id: &str) -> Result<(), sea_orm::DbErr>
+                where
+                    C: sea_orm::ConnectionTrait,
+                {
+                    Err(sea_orm::DbErr::Custom("Soft delete not enabled for this entity".to_string()))
+                }
+
+                async fn soft_delete_many<C>(_db: &C, _ids: &[String]) -> Result<(), sea_orm::DbErr>
+                where
+                    C: sea_orm::ConnectionTrait,
+                {
+                    Err(sea_orm::DbErr::Custom("Soft delete not enabled for this entity".to_string()))
+                }
+
+                fn batch_update() -> sea_orm::UpdateMany<Self> {
+                    // 获取当前上下文信息
+                    let context = ::auto_field_trait::auto_field_trait::AutoFieldContext::current_safe();
+                     // 调用原始的 update_many 方法
+                    let mut update_many = sea_orm::EntityTrait::update_many();
+                    #(#before_update_body)*
+                    update_many
+                }
+
+                fn batch_insert_many<I>(models: I) -> sea_orm::Insert<Self::ActiveModel>
+                where
+                    I: IntoIterator<Item = Self::ActiveModel>,
+                {
+                    // 获取当前上下文信息
+                    let context = ::auto_field_trait::auto_field_trait::AutoFieldContext::current_safe();
+
+                    // 处理每个 ActiveModel，应用自动字段填充
+                    let processed_models: Vec<Self::ActiveModel> = models
+                        .into_iter()
+                        .map(|mut active_model| {
+                            // 应用插入时的自动字段填充
+                            #(#before_insert_body)*
+                            active_model
+                        })
+                        .collect();
+                    // 执行批量插入
+                   sea_orm::EntityTrait::insert_many(processed_models)
+                }
+            }
+        });
+    }
 
     Ok(quote! {
         #[async_trait::async_trait]
@@ -718,15 +732,15 @@ fn generate_soft_delete_ext(
                 update_many
             }
 
-            async fn batch_insert_many<C>(db: &C, active_models: Vec<Self::ActiveModel>) -> Result<sea_orm::InsertResult<Self::ActiveModel>, sea_orm::DbErr>
+           fn batch_insert_many<I>(models: I) -> sea_orm::Insert<Self::ActiveModel>
             where
-                C: sea_orm::ConnectionTrait
+                I: IntoIterator<Item = Self::ActiveModel>,
             {
                 // 获取当前上下文信息
                 let context = ::auto_field_trait::auto_field_trait::AutoFieldContext::current_safe();
 
                 // 处理每个 ActiveModel，应用自动字段填充
-                let processed_models: Vec<Self::ActiveModel> = active_models
+                let processed_models: Vec<Self::ActiveModel> = models
                     .into_iter()
                     .map(|mut active_model| {
                         // 应用插入时的自动字段填充
@@ -735,7 +749,7 @@ fn generate_soft_delete_ext(
                     })
                     .collect();
                 // 执行批量插入
-               sea_orm::EntityTrait::insert_many(processed_models).exec(db).await
+               sea_orm::EntityTrait::insert_many(processed_models)
             }
         }
     })
