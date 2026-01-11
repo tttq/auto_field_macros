@@ -189,7 +189,7 @@ fn generate_auto_field_impl(input: &DeriveInput) -> syn::Result<proc_macro2::Tok
     // 生成 QueryExtensions 实现
     let query_extensions_impl = generate_query_extensions(&config, struct_name)?;
     
-    // 生成 SoftDeleteExt 实现
+    // 生成 CustomizationExt 实现
     let soft_delete_impl = generate_soft_delete_ext(&config, struct_name, &active_model_name)?;
     
     Ok(quote! {
@@ -489,7 +489,7 @@ fn generate_query_extensions(
     })
 }
 
-/// 生成 SoftDeleteExt 实现
+/// 生成 CustomizationExt 实现
 fn generate_soft_delete_ext(
     config: &AutoFieldConfig,
     struct_name: &syn::Ident,
@@ -645,7 +645,7 @@ fn generate_soft_delete_ext(
         // 如果没有启用软删除，返回空实现
         return Ok(quote! {
             #[async_trait::async_trait]
-            impl ::auto_field_trait::auto_field_trait::SoftDeleteExt for #entity_name {
+            impl ::auto_field_trait::auto_field_trait::CustomizationExt for #entity_name {
                 async fn soft_delete<C>(_db: &C, _id: &str) -> Result<(), sea_orm::DbErr>
                 where
                     C: sea_orm::ConnectionTrait,
@@ -700,7 +700,7 @@ fn generate_soft_delete_ext(
 
     Ok(quote! {
         #[async_trait::async_trait]
-        impl ::auto_field_trait::auto_field_trait::SoftDeleteExt for #entity_name {
+        impl ::auto_field_trait::auto_field_trait::CustomizationExt for #entity_name {
             async fn soft_delete<C>(db: &C, id: &str) -> Result<(), sea_orm::DbErr>
             where
                 C: sea_orm::ConnectionTrait,
