@@ -12,14 +12,13 @@ struct AutoFieldConfig {
     pub tenant: bool,
     pub version: bool,
     pub soft_delete: bool,
-    pub skip_default_filters: bool,
 }
 
 impl AutoFieldConfig {
     /// 从属性中解析配置
     pub fn from_attributes(attrs: &[Attribute]) -> syn::Result<Self> {
         let mut config = Self::default();
-        
+
         for attr in attrs {
             if attr.path().is_ident("auto_field") {
                 match &attr.meta {
@@ -28,14 +27,14 @@ impl AutoFieldConfig {
                         let nested = meta_list.parse_args_with(
                             syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated
                         )?;
-                        
+
                         for meta in nested {
                             match meta {
                                 Meta::NameValue(name_value) => {
                                     let key = name_value.path.get_ident()
                                         .ok_or_else(|| syn::Error::new_spanned(&name_value.path, "Expected identifier"))?
                                         .to_string();
-                                    
+
                                     match key.as_str() {
                                         "snowflake_id" => {
                                             config.snowflake_id = parse_bool_value(&name_value.value)?;
@@ -55,9 +54,6 @@ impl AutoFieldConfig {
                                         "soft_delete" => {
                                             config.soft_delete = parse_bool_value(&name_value.value)?;
                                         }
-                                        "skip_default_filters" => {
-                                            config.skip_default_filters = parse_bool_value(&name_value.value)?;
-                                        }
                                         _ => {
                                             return Err(syn::Error::new_spanned(
                                                 &name_value.path,
@@ -71,7 +67,7 @@ impl AutoFieldConfig {
                                     let key = path.get_ident()
                                         .ok_or_else(|| syn::Error::new_spanned(&path, "Expected identifier"))?
                                         .to_string();
-                                    
+
                                     match key.as_str() {
                                         "snowflake_id" => config.snowflake_id = true,
                                         "timestamps" => config.timestamps = true,
@@ -79,7 +75,6 @@ impl AutoFieldConfig {
                                         "tenant" => config.tenant = true,
                                         "version" => config.version = true,
                                         "soft_delete" => config.soft_delete = true,
-                                        "skip_default_filters" => config.skip_default_filters = false,
                                         _ => {
                                             return Err(syn::Error::new_spanned(
                                                 &path,
@@ -106,7 +101,6 @@ impl AutoFieldConfig {
                             tenant: false,
                             version: false,
                             soft_delete: false,
-                            skip_default_filters: false,
                         };
                     }
                     _ => {
@@ -118,10 +112,10 @@ impl AutoFieldConfig {
                 }
             }
         }
-        
+
         Ok(config)
     }
-    
+
     /// 验证配置的有效性
     pub fn validate(&self) -> syn::Result<()> {
         // 如果启用了审计字段，时间戳字段也应该启用
@@ -131,7 +125,7 @@ impl AutoFieldConfig {
                 "audit fields require timestamps to be enabled"
             ));
         }
-        
+
         Ok(())
     }
 }
@@ -155,7 +149,7 @@ fn parse_bool_value(expr: &Expr) -> syn::Result<bool> {
 #[proc_macro_derive(AutoField, attributes(auto_field))]
 pub fn derive_auto_field(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    
+
     match generate_auto_field_impl(&input) {
         Ok(tokens) => tokens.into(),
         Err(err) => err.to_compile_error().into(),
@@ -167,31 +161,20 @@ fn generate_auto_field_impl(input: &DeriveInput) -> syn::Result<proc_macro2::Tok
     // 解析配置
     let config = AutoFieldConfig::from_attributes(&input.attrs)?;
     config.validate()?;
-    
-    // 不再分析实体字段，完全使用配置文件中的参数
-    // let entity_fields = match &input.data {
-    //     Data::Struct(data_struct) => EntityFields::from_fields(&data_struct.fields),
-    //     _ => {
-    //         return Err(syn::Error::new_spanned(
-    //             input,
-    //             "AutoField can only be derived for structs"
-    //         ));
-    //     }
-    // };
-    
+
     let struct_name = &input.ident;
     // SeaORM 生成的 ActiveModel 类型名称是 ActiveModel
     let active_model_name = syn::Ident::new("ActiveModel", struct_name.span());
-    
+
     // 生成 ActiveModelBehavior 实现
     let behavior_impl = generate_active_model_behavior(&config, &active_model_name)?;
-    
+
     // 生成 QueryExtensions 实现
     let query_extensions_impl = generate_query_extensions(&config, struct_name)?;
-    
+
     // 生成 CustomizationExt 实现
     let soft_delete_impl = generate_soft_delete_ext(&config, struct_name, &active_model_name)?;
-    
+
     Ok(quote! {
         #behavior_impl
         #query_extensions_impl
@@ -206,7 +189,7 @@ fn generate_active_model_behavior(
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut before_insert_body = Vec::new();
     let mut before_update_body = Vec::new();
-    
+
     // 添加字段值保护逻辑的辅助宏
     before_insert_body.push(quote! {
         macro_rules! should_fill_field {
@@ -226,7 +209,7 @@ fn generate_active_model_behavior(
             };
         }
     });
-    
+
     // 生成插入时的字段填充逻辑
     if config.snowflake_id {
         before_insert_body.push(quote! {
@@ -241,7 +224,7 @@ fn generate_active_model_behavior(
             }
         });
     }
-    
+
     if config.timestamps {
         before_insert_body.push(quote! {
             if should_fill_field!(self.create_time) {
@@ -252,7 +235,7 @@ fn generate_active_model_behavior(
             }
         });
     }
-    
+
     if config.audit {
         before_insert_body.push(quote! {
             if should_fill_field!(self.create_by) {
@@ -271,7 +254,7 @@ fn generate_active_model_behavior(
             }
         });
     }
-    
+
     if config.tenant {
         before_insert_body.push(quote! {
             if should_fill_field!(self.tenant_id) {
@@ -290,7 +273,7 @@ fn generate_active_model_behavior(
             }
         });
     }
-    
+
     if config.version {
         before_insert_body.push(quote! {
             if should_fill_field!(self.version) {
@@ -298,7 +281,7 @@ fn generate_active_model_behavior(
             }
         });
     }
-    
+
     if config.soft_delete {
         before_insert_body.push(quote! {
             if should_fill_field!(self.delete_flag) {
@@ -306,14 +289,14 @@ fn generate_active_model_behavior(
             }
         });
     }
-    
+
     // 生成更新时的字段填充逻辑
     if config.timestamps {
         before_update_body.push(quote! {
             self.update_time = sea_orm::ActiveValue::Set(Some(chrono::Utc::now().naive_utc()));
         });
     }
-    
+
     if config.audit {
         before_update_body.push(quote! {
             if let Some(user_name) = &context.user_name {
@@ -328,7 +311,7 @@ fn generate_active_model_behavior(
             }
         });
     }
-    
+
     if config.version {
         before_update_body.push(quote! {
             match &self.version {
@@ -350,7 +333,7 @@ fn generate_active_model_behavior(
             }
         });
     }
-    
+
     Ok(quote! {
         use async_trait::async_trait;
 
@@ -361,7 +344,7 @@ fn generate_active_model_behavior(
                 C: sea_orm::ConnectionTrait,
             {
                 let context = ::auto_field_trait::auto_field_trait::AutoFieldContext::current_safe();
-                
+
                 if insert {
                     #(#before_insert_body)*
                 } else {
@@ -380,9 +363,9 @@ fn generate_query_extensions(
 ) -> syn::Result<proc_macro2::TokenStream> {
     // SeaORM 生成的 Entity 类型名称是 Entity
     let entity_name = syn::Ident::new("Entity", struct_name.span());
-    
+
     let mut methods = Vec::new();
-    
+
     // find_not_deleted 方法 - 总是添加 delete_flag = 0 条件
     if config.soft_delete {
         methods.push(quote! {
@@ -399,7 +382,7 @@ fn generate_query_extensions(
             }
         });
     }
-    
+
     // 租户相关查询方法
     if config.tenant {
         if config.soft_delete {
@@ -427,7 +410,7 @@ fn generate_query_extensions(
             }
         });
     }
-    
+
     // 创建人相关查询方法
     if config.audit {
         // find_by_creator_id 方法
@@ -448,7 +431,7 @@ fn generate_query_extensions(
                 }
             });
         }
-        
+
         // find_by_creator_name 方法
         if config.soft_delete {
             methods.push(quote! {
@@ -481,7 +464,7 @@ fn generate_query_extensions(
             }
         });
     }
-    
+
     Ok(quote! {
         impl ::auto_field_trait::auto_field_trait::QueryExtensions for #entity_name {
             #(#methods)*
@@ -707,14 +690,14 @@ fn generate_soft_delete_ext(
             {
                 if let Some(model) = Self::find_by_id(id).one(db).await? {
                     let mut active_model: #active_model_name = model.into();
-                    
+
                     // 设置删除标记为1，触发 before_update 钩子
                     active_model.delete_flag = sea_orm::ActiveValue::Set(Some(1));
                     active_model.update(db).await?;
                 }
                 Ok(())
             }
-            
+
             async fn soft_delete_many<C>(db: &C, ids: &[String]) -> Result<(), sea_orm::DbErr>
             where
                 C: sea_orm::ConnectionTrait,
