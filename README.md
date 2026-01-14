@@ -1,153 +1,244 @@
-# AutoField 宏系统
+# auto_field_macros
 
-SeaORM 自动字段填充宏，通过 ActiveModelBehavior 生命周期钩子自动填充通用数据库字段。
+## Project Overview
 
-## 功能特性
+`auto_field_macros` is a procedural macro library developed in Rust, designed specifically for the `auto_field_trait` library, providing macro support for automatic field processing. This library simplifies the code writing for developers when using the `auto_field_trait` library by automatically generating the required trait implementations and field processing logic through macro definitions.
 
-- 🔄 **自动字段填充**: 在插入和更新操作时自动填充字段
-- 🆔 **雪花ID生成**: 自动生成唯一的雪花ID作为主键
-- ⏰ **时间戳管理**: 自动管理创建时间和更新时间
-- 👤 **审计跟踪**: 自动记录创建人和修改人信息
-- 🏢 **多租户支持**: 自动填充租户信息
-- 📊 **版本控制**: 自动管理记录版本号
-- 🗑️ **软删除**: 支持逻辑删除功能
-- 🔧 **可配置**: 灵活的配置选项，按需启用功能
+### Features
 
-## 使用方法
+- **Automatic ActiveModelBehavior Implementation**: Automatically handles field filling logic
+- **Automatic QueryExtensions Implementation**: Provides convenient query methods
+- **Automatic CustomizationExt Implementation**: Supports soft delete and batch operations
+- **Flexible Configuration Options**: Select required features through attribute configuration
+- **Supports Multiple Field Types**:
+  - Snowflake ID generation
+  - Timestamp management
+  - Audit logging
+  - Tenant support
+  - Version control
+  - Soft delete
 
-### 1. 添加宏到实体
+### Technical Architecture
+
+- **Language**: Rust
+- **Core Dependencies**:
+  - `proc-macro2`：Procedural macro support
+  - `quote`：Rust code generation
+  - `syn`：Rust syntax analysis
+
+## Installation and Configuration
+
+### Installation
+
+Add dependencies to your `Cargo.toml` file:
+
+```toml
+dependencies =
+    auto_field_trait = { version = "0.1.3", git = "https://github.com/tttq/auto_field_trait.git", features = ["postgres", "with-web"] }
+    sea-orm = "0.12"
+
+proc-macro-dependencies =
+    auto_field_macros = { version = "0.1.3", git = "https://github.com/tttq/auto_field_macros.git" }
+```
+
+### Configuration
+
+The `auto_field_macros` library does not require additional configuration files, only need to be configured through attributes when using it.
+
+## Usage Guide
+
+### Basic Usage
+
+1. **Import Dependencies**:
 
 ```rust
 use auto_field_macros::AutoField;
-use sea_orm::entity::prelude::*;
-use serde::{Deserialize, Serialize};
+use auto_field_trait::QueryExtensions;
+use auto_field_trait::CustomizationExt;
+```
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize, AutoField)]
-#[sea_orm(table_name = "sys_user")]
-#[auto_field(
-    snowflake_id = true,        // 启用雪花ID自动生成
-    timestamps = true,          // 启用时间戳字段自动填充
-    audit = true,              // 启用审计字段自动填充
-    tenant = true,             // 启用租户字段自动填充
-    version = true,            // 启用版本号自动管理
-    soft_delete = true,        // 启用软删除功能
-    skip_default_filters = false  // 是否跳过默认查询条件（delete_flag 和 tenant_id）
-)]
+2. **Define Entity and Use Macro**:
+
+```rust
+use sea_orm::entity::prelude::*;
+use auto_field_macros::AutoField;
+
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, AutoField)]
+#[sea_orm(table_name = "users")]
+#[auto_field(snowflake_id, timestamps, audit, tenant, version, soft_delete)]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
+    #[sea_orm(primary_key)]
     pub id: String,
-    pub create_time: Option<DateTime>,
-    pub update_time: Option<DateTime>,
+    pub name: String,
+    pub email: String,
+    pub create_time: Option<DateTime<Utc>>,
+    pub update_time: Option<DateTime<Utc>>,
     pub create_by: Option<String>,
+    pub create_id: Option<String>,
     pub update_by: Option<String>,
+    pub update_id: Option<String>,
     pub tenant_id: Option<String>,
     pub tenant_name: Option<String>,
     pub version: Option<i32>,
     pub delete_flag: Option<i32>,
-    
-    // 业务字段
-    pub user_name: Option<String>,
-    pub email: Option<String>,
 }
 ```
 
-### 2. 配置选项
+3. **Macro Configuration Options**:
 
-| 选项 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `snowflake_id` | bool | false | 是否启用雪花ID自动生成 |
-| `timestamps` | bool | false | 是否启用时间戳字段自动填充 |
-| `audit` | bool | false | 是否启用审计字段自动填充 |
-| `tenant` | bool | false | 是否启用租户字段自动填充 |
-| `version` | bool | false | 是否启用版本号自动管理 |
-| `soft_delete` | bool | false | 是否启用软删除功能 |
-| `skip_default_filters` | bool | false | 是否跳过默认查询条件（delete_flag=0 和 tenant_id 过滤） |
+The `auto_field` macro supports the following configuration options:
 
-### 3. 简化配置
+- `snowflake_id`：Enable snowflake ID automatic generation
+- `timestamps`：Enable timestamp automatic filling
+- `audit`：Enable audit field automatic filling
+- `tenant`：Enable tenant field automatic filling
+- `version`：Enable version number automatic management
+- `soft_delete`：Enable soft delete functionality
+
+You can configure it in the following ways:
 
 ```rust
-// 使用默认配置（所有功能启用）
-#[derive(AutoField)]
-#[auto_field]
-pub struct Model { ... }
+// Way 1: Enable all features
+#[auto_field(snowflake_id, timestamps, audit, tenant, version, soft_delete)]
 
-// 只启用特定功能
-#[derive(AutoField)]
+// Way 2: Enable partial features
 #[auto_field(timestamps, audit)]
-pub struct Model { ... }
+
+// Way 3: Use key-value form
+#[auto_field(snowflake_id = true, timestamps = true)]
 ```
 
-## 生成的功能
-
-### ActiveModelBehavior 实现
-
-宏会自动生成 `ActiveModelBehavior` 实现，包含：
-
-- `before_insert`: 插入前的字段填充
-- `before_update`: 更新前的字段填充
-
-### QueryExtensions 实现
-
-宏会自动生成查询扩展方法：
+4. **Use Automatically Generated Functions**:
 
 ```rust
-// 查询未删除的记录
-let users = Entity::find_not_deleted().all(&db).await?;
+// Use QueryExtensions
+let users = User::find_not_deleted().all(db).await?;
+let users = User::find_by_tenant_id("tenant_123").all(db).await?;
 
-// 按租户查询
-let tenant_users = Entity::find_by_tenant_id("tenant_001").all(&db).await?;
+// Use CustomizationExt
+User::soft_delete(db, "user_789").await?;
+User::soft_delete_many(db, &["user_101", "user_102"]).await?;
 
-// 按创建人查询
-let user_records = Entity::find_by_creator_id("user_123").all(&db).await?;
+// Use batch_update
+let update_many = User::batch_update()
+    .col_expr(User::Column::Name, Expr::value("new_name"))
+    .filter(User::Column::Id.eq("user_123"))
+    .exec(db)
+    .await?;
+
+// Use batch_insert_many
+let users = vec![
+    UserActiveModel {
+        name: ActiveValue::Set("user_1".to_string()),
+        email: ActiveValue::Set("user_1@example.com".to_string()),
+        ..Default::default()
+    },
+    UserActiveModel {
+        name: ActiveValue::Set("user_2".to_string()),
+        email: ActiveValue::Set("user_2@example.com".to_string()),
+        ..Default::default()
+    },
+];
+
+let insert_result = User::batch_insert_many(users)
+    .exec(db)
+    .await?;
 ```
 
-**默认查询条件**：
+### Advanced Usage
 
-当 `skip_default_filters = false`（默认值）时，查询方法会自动添加以下过滤条件：
+1. **Conditional Configuration**:
 
-- `delete_flag = 0`：自动过滤已删除的记录（如果启用了 `soft_delete`）
-- `tenant_id = 当前租户ID`：自动过滤当前租户的数据（如果启用了 `tenant`）
-
-这些默认条件与新增和修改用户时获取上下文的方式一致，都是从 `AutoFieldContext::current_safe()` 获取当前租户ID。
-
-如果需要查询所有记录（包括已删除的记录或其他租户的数据），可以设置 `skip_default_filters = true` 来禁用默认过滤条件。
-
-### SoftDeleteExt 实现
-
-宏会自动生成软删除方法：
+You can select the features you need according to your requirements, for example, only enable timestamps and soft delete:
 
 ```rust
-// 软删除单个记录
-Entity::soft_delete(&db, "user_id").await?;
-
-// 软删除多个记录
-Entity::soft_delete_many(&db, &["id1", "id2"]).await?;
+#[auto_field(timestamps, soft_delete)]
 ```
 
-## 字段映射
+2. **Validation Configuration**:
 
-| 配置 | 影响的字段 | 插入时行为 | 更新时行为 |
-|------|------------|------------|------------|
-| `snowflake_id` | `id` | 生成雪花ID | 不变 |
-| `timestamps` | `create_time`, `update_time` | 设置当前时间 | 更新 `update_time` |
-| `audit` | `create_by`, `update_by` | 设置当前用户 | 更新 `update_by` |
-| `tenant` | `tenant_id`, `tenant_name` | 设置当前租户 | 不变 |
-| `version` | `version` | 设置为 1 | 递增 |
-| `soft_delete` | `delete_flag` | 设置为 0 | 软删除时设置为 1 |
+The macro will automatically validate the validity of the configuration, for example, if you enable the `audit` feature, you must also enable the `timestamps` feature, otherwise a compilation error will occur.
 
-## 注意事项
+3. **Custom Field Names**:
 
-1. **字段保护**: 只有当字段为 `ActiveValue::NotSet` 时才会自动填充
-2. **上下文依赖**: 审计和租户字段需要配置上下文提供者
-3. **字段类型**: 确保实体字段类型与预期类型匹配
-4. **依赖组件**: 雪花ID生成需要注册 `SnowflakeIdGenerator` 组件
+Currently, the `auto_field_macros` library uses fixed field names, such as:
+- `create_time`：Creation time
+- `update_time`：Update time
+- `create_by`：Creator
+- `create_id`：Creator ID
+- `update_by`：Updater
+- `update_id`：Updater ID
+- `tenant_id`：Tenant ID
+- `tenant_name`：Tenant name
+- `version`：Version number
+- `delete_flag`：Delete flag
 
-## 错误处理
+If you need to customize field names, you can modify the source code of the `auto_field_trait` library.
 
-宏会进行以下验证：
+## Notes
 
-- 配置有效性检查
-- 字段依赖关系验证
-- 类型兼容性检查
+### Environment Requirements
 
-编译时错误会提供清晰的错误信息帮助调试。
+- **Rust Version**: 1.65.0 or higher
+- **SeaORM Version**: 0.12.x
+- **auto_field_trait Version**: Matching the `auto_field_macros` version
+
+### Limitations
+
+1. Currently only supports SeaORM framework
+2. Only supports fixed field names, does not support custom field names
+3. Must be used with the `auto_field_trait` library
+4. Some features have dependencies, for example, the `audit` feature depends on the `timestamps` feature
+
+### Common Issues
+
+1. **Issue**: Compilation error, missing dependencies
+   **Solution**: Ensure that all dependencies are correctly installed, including `auto_field_trait` and `sea-orm`
+
+2. **Issue**: Compilation error, invalid configuration
+   **Solution**: Check if the macro configuration is correct, for example, the `audit` feature must also enable the `timestamps` feature
+
+3. **Issue**: Auto fields are not being filled correctly
+   **Solution**: Ensure that the `HookedSeaOrmPlugin` plugin and context getter are correctly registered
+
+## Project Directory Structure
+
+```
+auto_field_macros/
+├── src/
+│   └── lib.rs                # Library entry file, containing macro definitions
+├── Cargo.toml                # Dependency configuration
+└── README.md                 # Project documentation
+```
+
+### File Usage Description
+
+| File/Folder | Purpose |
+| --- | --- |
+| `src/lib.rs` | Library entry point, containing the definition and implementation of the `AutoField` macro |
+| `Cargo.toml` | Project dependencies and build configuration |
+| `README.md` | Project documentation, including usage instructions and API reference |
+
+## Macro Implementation Details
+
+### AutoField Macro Configuration Structure
+
+```rust
+#[derive(Debug, Clone, Default)]
+struct AutoFieldConfig {
+    pub snowflake_id: bool,
+    pub timestamps: bool,
+    pub audit: bool,
+    pub tenant: bool,
+    pub version: bool,
+    pub soft_delete: bool,
+}
+```
+
+### Macro Processing Flow
+
+1. **Parse Attribute Configuration**: Parse the `#[auto_field(...)]` attribute and generate a configuration structure
+2. **Validate Configuration**: Validate the validity of the configuration, for example, the `audit` feature must also enable the `timestamps` feature
+3. **Generate ActiveModelBehavior Implementation**: Automatically handle field filling logic
+4. **Generate QueryExtensions Implementation**: Provide convenient query methods
+5. **Generate CustomizationExt Implementation**: Support soft delete and batch operations
