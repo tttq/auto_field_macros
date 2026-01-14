@@ -4,10 +4,14 @@ version = "0.1.2"
 edition = "2021"
 
 [lib]
+# 声明这是一个过程宏库
 proc-macro = true
 
 [dependencies]
-proc-macro2 = "1.0"
-quote = "1.0"
-syn = { version = "2.0", features = ["full", "extra-traits"] }
-async-trait = "0.1"
+# 过程宏核心依赖
+proc-macro2 = "1.0"  # 过程宏 API 的安全包装，提供跨编译器版本的兼容性
+syn = { version = "2.0", features = ["full", "extra-traits"] }  # Rust 语法树解析库，支持完整语法和额外特性
+quote = "1.0"  # 用于生成 Rust 代码字符串的宏
+
+# 异步编程支持
+async-trait = "0.1"  # 用于生成异步 trait 实现的宏
